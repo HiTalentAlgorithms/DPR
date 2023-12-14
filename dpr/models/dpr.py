@@ -16,41 +16,35 @@ import torch
 import transformers
 from torch import Tensor as T
 from torch import nn
-
-
-if transformers.__version__.startswith("4"):
-    from transformers import BertConfig, BertModel
-    from transformers import AdamW
-    from transformers import BertTokenizer
-    from transformers import RobertaTokenizer
-
+from transformers import DPRContextEncoder, DPRContextEncoderTokenizer
+from transformers import DPRQuestionEncoder, DPRQuestionEncoderTokenizer
+from transformers import DPRConfig
+from transformers import AdamW
+from transformers import BertTokenizer
+from transformers import RobertaTokenizer
 from dpr.utils.data_utils import Tensorizer
 from dpr.models.biencoder import BiEncoder
-from .reader import Reader
-
 logger = logging.getLogger(__name__)
 
 
-def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
+def get_dpr_biencoder_components(cfg, inference_only: bool = False, **kwargs):
     dropout = cfg.encoder.dropout if hasattr(cfg.encoder, "dropout") else 0.0
-    question_encoder = HFBertEncoder.init_encoder(
-        cfg.encoder.pretrained_model_cfg,
+    q_encoder = DPRBertEncoder.init_encoder(
+        cfg.encoder.q_pretrained_model_cfg,
         projection_dim=cfg.encoder.projection_dim,
         dropout=dropout,
         pretrained=cfg.encoder.pretrained,
         **kwargs
     )
-    ctx_encoder = HFBertEncoder.init_encoder(
-        cfg.encoder.pretrained_model_cfg,
+    ctx_encoder = DPRBertEncoder.init_encoder(
+        cfg.encoder.ctx_pretrained_model_cfg,
         projection_dim=cfg.encoder.projection_dim,
         dropout=dropout,
         pretrained=cfg.encoder.pretrained,
         **kwargs
     )
-
     fix_ctx_encoder = cfg.encoder.fix_ctx_encoder if hasattr(cfg.encoder, "fix_ctx_encoder") else False
-    biencoder = BiEncoder(question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder)
-
+    biencoder = BiEncoder(q_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder)
     optimizer = (
         get_optimizer(
             biencoder,
@@ -61,43 +55,14 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
         if not inference_only
         else None
     )
-
-    tensorizer = get_bert_tensorizer(cfg)
-    return tensorizer, biencoder, optimizer
-
-
-def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
-    dropout = cfg.encoder.dropout if hasattr(cfg.encoder, "dropout") else 0.0
-    encoder = HFBertEncoder.init_encoder(
-        cfg.encoder.pretrained_model_cfg,
-        projection_dim=cfg.encoder.projection_dim,
-        dropout=dropout,
-        pretrained=cfg.encoder.pretrained,
-        **kwargs
-    )
-
-    hidden_size = encoder.config.hidden_size
-    reader = Reader(encoder, hidden_size)
-
-    optimizer = (
-        get_optimizer(
-            reader,
-            learning_rate=cfg.train.learning_rate,
-            adam_eps=cfg.train.adam_eps,
-            weight_decay=cfg.train.weight_decay,
-        )
-        if not inference_only
-        else None
-    )
-
-    tensorizer = get_bert_tensorizer(cfg)
-    return tensorizer, reader, optimizer
+    # ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained("facebook/dpr-ctx_encoder-multiset-base")
+    return get_bert_tensorizer(cfg), biencoder, optimizer
 
 
 # TODO: unify tensorizer init methods
 def get_bert_tensorizer(cfg):
     sequence_length = cfg.encoder.sequence_length
-    pretrained_model_cfg = cfg.encoder.pretrained_model_cfg
+    pretrained_model_cfg = cfg.encoder.q_pretrained_model_cfg
     tokenizer = get_bert_tokenizer(pretrained_model_cfg, do_lower_case=cfg.do_lower_case)
     if cfg.special_tokens:
         _add_special_tokens(tokenizer, cfg.special_tokens)
@@ -191,9 +156,9 @@ def get_roberta_tokenizer(pretrained_cfg_name: str, do_lower_case: bool = True):
     return RobertaTokenizer.from_pretrained(pretrained_cfg_name, do_lower_case=do_lower_case)
 
 
-class HFBertEncoder(BertModel):
+class DPRBertEncoder(DPRContextEncoder):
     def __init__(self, config, project_dim: int = 0):
-        BertModel.__init__(self, config)
+        DPRContextEncoder.__init__(self, config)
         assert config.hidden_size > 0, "Encoder hidden_size can't be zero"
         self.encode_proj = nn.Linear(config.hidden_size, project_dim) if project_dim != 0 else None
         self.init_weights()
@@ -201,17 +166,16 @@ class HFBertEncoder(BertModel):
     @classmethod
     def init_encoder(
         cls, cfg_name: str, projection_dim: int = 0, dropout: float = 0.1, pretrained: bool = True, **kwargs
-    ) -> BertModel:
-        logger.info("Initializing HF BERT Encoder. cfg_name=%s", cfg_name)
-        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased")
+    ) -> DPRContextEncoder:
+        logger.info("Initializing DPR BERT Encoder. cfg_name=%s", cfg_name)
+        cfg = DPRConfig.from_pretrained(cfg_name)
         if dropout != 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
-
         if pretrained:
             return cls.from_pretrained(cfg_name, config=cfg, project_dim=projection_dim, **kwargs)
         else:
-            return HFBertEncoder(cfg, project_dim=projection_dim)
+            return DPRBertEncoder(cfg, project_dim=projection_dim)
 
     def forward(
         self,

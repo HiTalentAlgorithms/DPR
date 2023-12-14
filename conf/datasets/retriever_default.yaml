@@ -1,5 +1,3 @@
-# @package _group_
-
 nq_test:
   _target_: dpr.data.retriever_data.CsvQASrc
   file: data.retriever.qas.nq-test

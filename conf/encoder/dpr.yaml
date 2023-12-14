@@ -1,8 +1,9 @@
-# model type. One of [hf_bert, pytext_bert, fairseq_roberta]
-encoder_model_type: hf_bert
+# model type. One of [dpr, hf_bert, pytext_bert, fairseq_roberta]
+encoder_model_type: dpr
 
 # HuggingFace's config name for model initialization
-pretrained_model_cfg: bert-base-uncased
+q_pretrained_model_cfg: facebook/dpr-question_encoder-multiset-base
+ctx_pretrained_model_cfg: facebook/dpr-ctx_encoder-multiset-base
 
 # Some encoders need to be initialized from a file
 pretrained_file:

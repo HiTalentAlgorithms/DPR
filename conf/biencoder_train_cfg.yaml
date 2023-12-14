@@ -1,12 +1,13 @@
 
 # configuration groups
 defaults:
-  - encoder: hf_bert
+  - encoder: dpr
   - train: biencoder_default
   - datasets: encoder_train_default
+  - _self_
 
 train_datasets:
-dev_datasets:
+dev_datasets: [nq_dev]
 output_dir:
 train_sampling_rates:
 loss_scale_factors:
@@ -19,7 +20,7 @@ seed: 12345
 checkpoint_file_name: dpr_biencoder
 
 # A trained bi-encoder checkpoint file to initialize the model
-model_file:
+model_file: sdfsdf
 
 # TODO: move to a conf group
 # local_rank for distributed training on gpus
@@ -27,13 +28,13 @@ model_file:
 # TODO: rename to distributed_rank
 local_rank: -1
 global_loss_buf_sz: 592000
-device:
+device: "cuda:0"
 distributed_world_size:
 distributed_port:
 distributed_init_method:
 
 no_cuda: False
-n_gpu:
+n_gpu: 1
 fp16: False
 
 # For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."

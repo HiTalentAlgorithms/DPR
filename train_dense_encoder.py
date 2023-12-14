@@ -744,7 +744,7 @@ def _do_biencoder_fwd_pass(
     return loss, is_correct
 
 
-@hydra.main(config_path="conf", config_name="biencoder_train_cfg")
+@hydra.main(config_path="conf", version_base=None, config_name="biencoder_train_cfg")
 def main(cfg: DictConfig):
     if cfg.train.gradient_accumulation_steps < 1:
         raise ValueError(

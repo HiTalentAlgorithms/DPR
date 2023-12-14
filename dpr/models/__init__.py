@@ -7,6 +7,8 @@
 
 import importlib
 
+from dpr.models.dpr import get_dpr_biencoder_components
+
 """
  'Router'-like set of methods for component initialization with lazy imports 
 """
@@ -60,6 +62,7 @@ def init_hf_roberta_tenzorizer(args, **kwargs):
 
 
 BIENCODER_INITIALIZERS = {
+    "dpr": get_dpr_biencoder_components,
     "hf_bert": init_hf_bert_biencoder,
     "pytext_bert": init_pytext_bert_biencoder,
     "fairseq_roberta": init_fairseq_roberta_biencoder,
