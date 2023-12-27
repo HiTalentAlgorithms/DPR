@@ -13,15 +13,12 @@ import logging
 from typing import Tuple, List
 
 import torch
-import transformers
 from torch import Tensor as T
 from torch import nn
-from transformers import DPRContextEncoder, DPRContextEncoderTokenizer
-from transformers import DPRQuestionEncoder, DPRQuestionEncoderTokenizer
+from transformers import DPRContextEncoder
 from transformers import DPRConfig
 from transformers import AdamW
 from transformers import BertTokenizer
-from transformers import RobertaTokenizer
 from dpr.utils.data_utils import Tensorizer
 from dpr.models.biencoder import BiEncoder
 logger = logging.getLogger(__name__)
@@ -103,12 +100,6 @@ def _add_special_tokens(tokenizer, special_tokens):
     logger.info("additional_special_tokens_ids: %s", tokenizer.additional_special_tokens_ids)
     logger.info("all_special_tokens %s", tokenizer.all_special_tokens)
 
-
-def get_roberta_tensorizer(pretrained_model_cfg: str, do_lower_case: bool, sequence_length: int):
-    tokenizer = get_roberta_tokenizer(pretrained_model_cfg, do_lower_case=do_lower_case)
-    return RobertaTensorizer(tokenizer, sequence_length)
-
-
 def get_optimizer(
     model: nn.Module,
     learning_rate: float = 1e-5,
@@ -151,11 +142,6 @@ def get_bert_tokenizer(pretrained_cfg_name: str, do_lower_case: bool = True):
     return BertTokenizer.from_pretrained(pretrained_cfg_name, do_lower_case=do_lower_case)
 
 
-def get_roberta_tokenizer(pretrained_cfg_name: str, do_lower_case: bool = True):
-    # still uses HF code for tokenizer since they are the same
-    return RobertaTokenizer.from_pretrained(pretrained_cfg_name, do_lower_case=do_lower_case)
-
-
 class DPRBertEncoder(DPRContextEncoder):
     def __init__(self, config, project_dim: int = 0):
         DPRContextEncoder.__init__(self, config)
@@ -191,17 +177,8 @@ class DPRBertEncoder(DPRContextEncoder):
             attention_mask=attention_mask,
         )
 
-        # HF >4.0 version support
-        if transformers.__version__.startswith("4") and isinstance(
-            out,
-            transformers.modeling_outputs.BaseModelOutputWithPoolingAndCrossAttentions,
-        ):
-            sequence_output = out.last_hidden_state
-            pooled_output = None
-            hidden_states = out.hidden_states
-
-        elif self.config.output_hidden_states:
-            sequence_output, pooled_output, hidden_states = out
+        if self.config.output_hidden_states:
+            pooled_output, hidden_states = out.pooler_output, out.pooler_output
         else:
             hidden_states = None
             out = super().forward(
@@ -209,20 +186,11 @@ class DPRBertEncoder(DPRContextEncoder):
                 token_type_ids=token_type_ids,
                 attention_mask=attention_mask,
             )
-            sequence_output, pooled_output = out
-
-        if isinstance(representation_token_pos, int):
-            pooled_output = sequence_output[:, representation_token_pos, :]
-        else:  # treat as a tensor
-            bsz = sequence_output.size(0)
-            assert representation_token_pos.size(0) == bsz, "query bsz={} while representation_token_pos bsz={}".format(
-                bsz, representation_token_pos.size(0)
-            )
-            pooled_output = torch.stack([sequence_output[i, representation_token_pos[i, 1], :] for i in range(bsz)])
+            pooled_output = out.pooler_output
 
         if self.encode_proj:
             pooled_output = self.encode_proj(pooled_output)
-        return sequence_output, pooled_output, hidden_states
+        return pooled_output, hidden_states
 
     # TODO: make a super class for all encoders
     def get_out_size(self):
@@ -296,8 +264,3 @@ class BertTensorizer(Tensorizer):
 
     def get_token_id(self, token: str) -> int:
         return self.tokenizer.vocab[token]
-
-
-class RobertaTensorizer(BertTensorizer):
-    def __init__(self, tokenizer, max_length: int, pad_to_max: bool = True):
-        super(RobertaTensorizer, self).__init__(tokenizer, max_length, pad_to_max=pad_to_max)

@@ -84,31 +84,19 @@ class BiEncoder(nn.Module):
         fix_encoder: bool = False,
         representation_token_pos=0,
     ) -> (T, T, T):
-        sequence_output = None
-        pooled_output = None
-        hidden_states = None
         if ids is not None:
             if fix_encoder:
                 with torch.no_grad():
-                    sequence_output, pooled_output, hidden_states = sub_model(
-                        ids,
-                        segments,
-                        attn_mask,
-                        representation_token_pos=representation_token_pos,
-                    )
-
-                if sub_model.training:
-                    sequence_output.requires_grad_(requires_grad=True)
-                    pooled_output.requires_grad_(requires_grad=True)
+                    sub_model_outputs = sub_model(ids, segments, attn_mask, representation_token_pos=representation_token_pos)
             else:
-                sequence_output, pooled_output, hidden_states = sub_model(
-                    ids,
-                    segments,
-                    attn_mask,
-                    representation_token_pos=representation_token_pos,
-                )
-
-        return sequence_output, pooled_output, hidden_states
+                sub_model_outputs = sub_model(ids, segments, attn_mask, representation_token_pos=representation_token_pos,)
+        if len(sub_model_outputs) == 3:
+            _, pooled_output, hidden_states = sub_model_outputs
+        else:
+            pooled_output, hidden_states = sub_model_outputs
+        if sub_model.training:
+            pooled_output.requires_grad_(requires_grad=True)
+        return pooled_output, hidden_states
 
     def forward(
         self,
@@ -122,7 +110,7 @@ class BiEncoder(nn.Module):
         representation_token_pos=0,
     ) -> Tuple[T, T]:
         q_encoder = self.question_model if encoder_type is None or encoder_type == "question" else self.ctx_model
-        _q_seq, q_pooled_out, _q_hidden = self.get_representation(
+        q_pooled_out, _q_hidden = self.get_representation(
             q_encoder,
             question_ids,
             question_segments,
@@ -132,7 +120,7 @@ class BiEncoder(nn.Module):
         )
 
         ctx_encoder = self.ctx_model if encoder_type is None or encoder_type == "ctx" else self.question_model
-        _ctx_seq, ctx_pooled_out, _ctx_hidden = self.get_representation(
+        ctx_pooled_out, _ctx_hidden = self.get_representation(
             ctx_encoder, context_ids, ctx_segments, ctx_attn_mask, self.fix_ctx_encoder
         )
 
