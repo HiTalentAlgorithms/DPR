@@ -90,6 +90,8 @@ class BiEncoder(nn.Module):
                     sub_model_outputs = sub_model(ids, segments, attn_mask, representation_token_pos=representation_token_pos)
             else:
                 sub_model_outputs = sub_model(ids, segments, attn_mask, representation_token_pos=representation_token_pos,)
+        else:
+            return None, None
         if len(sub_model_outputs) == 3:
             _, pooled_output, hidden_states = sub_model_outputs
         else:

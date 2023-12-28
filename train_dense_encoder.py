@@ -341,6 +341,7 @@ class BiEncoderTrainer(object):
                 num_other_negatives,
                 shuffle=False,
             )
+            biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), cfg.device))
             total_ctxs = len(ctx_represenations)
             ctxs_ids = biencoder_input.context_ids
             ctxs_segments = biencoder_input.ctx_segments
@@ -365,7 +366,6 @@ class BiEncoderTrainer(object):
 
                 ctx_ids_batch = ctxs_ids[batch_start : batch_start + sub_batch_size]
                 ctx_seg_batch = ctxs_segments[batch_start : batch_start + sub_batch_size]
-
                 q_attn_mask = self.tensorizer.get_attn_mask(q_ids)
                 ctx_attn_mask = self.tensorizer.get_attn_mask(ctx_ids_batch)
                 with torch.no_grad():
@@ -769,7 +769,7 @@ def main(cfg: DictConfig):
         trainer.run_train()
     elif cfg.model_file and cfg.dev_datasets:
         logger.info("No train files are specified. Run 2 types of validation for specified model file")
-        trainer.validate_nll()
+        # trainer.validate_nll()
         trainer.validate_average_rank()
     else:
         logger.warning("Neither train_file or (model_file & dev_file) parameters are specified. Nothing to do.")
