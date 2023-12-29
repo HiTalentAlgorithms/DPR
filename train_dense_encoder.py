@@ -395,23 +395,24 @@ class BiEncoderTrainer(object):
                     len(ctx_represenations),
                     len(q_represenations),
                 )
+            if i > 1000:
+                break
 
         ctx_represenations = torch.cat(ctx_represenations, dim=0)
         q_represenations = torch.cat(q_represenations, dim=0)
 
         logger.info("Av.rank validation: total q_vectors size=%s", q_represenations.size())
         logger.info("Av.rank validation: total ctx_vectors size=%s", ctx_represenations.size())
+        logger.info("length of positive_idx_per_question=%s", len(positive_idx_per_question))
 
         q_num = q_represenations.size(0)
         assert q_num == len(positive_idx_per_question)
 
-        scores = sim_score_f(q_represenations, ctx_represenations)
-        values, indices = torch.sort(scores, dim=1, descending=True)
-
         rank = 0
-        for i, idx in enumerate(positive_idx_per_question):
-            # aggregate the rank of the known gold passage in the sorted results for each question
-            gold_idx = (indices[i] == idx).nonzero()
+        scores = sim_score_f(q_represenations, ctx_represenations)
+        for i, score in enumerate(scores):
+            _, indices = torch.sort(score, descending=True)
+            gold_idx = (indices == positive_idx_per_question[i]).nonzero()
             rank += gold_idx.item()
 
         if distributed_factor > 1:
@@ -425,7 +426,7 @@ class BiEncoderTrainer(object):
                     q_num += remote_q_num
 
         av_rank = float(rank / q_num)
-        logger.info("Av.rank validation: average rank %s, total questions=%d", av_rank, q_num)
+        logger.info("Av.rank validation: average rank %s, total questions=%d, total answers=%d, ", av_rank, q_num, len(ctx_represenations))
         return av_rank
 
     def _train_epoch(
