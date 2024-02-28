@@ -18,6 +18,7 @@ from typing import Tuple, List
 import numpy as np
 import torch
 import torch.nn.functional as F
+import transformers
 from torch import Tensor as T
 from torch import nn
 from transformers.models.dpr.modeling_dpr import DPRQuestionEncoderOutput, DPRContextEncoderOutput
@@ -27,6 +28,8 @@ from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import CheckpointState
 
 logger = logging.getLogger(__name__)
+
+transformers.logging.set_verbosity_error()
 
 BiEncoderBatch = collections.namedtuple(
     "BiENcoderInput",
@@ -90,9 +93,9 @@ class BiEncoder(nn.Module):
         if ids is not None:
             if fix_encoder:
                 with torch.no_grad():
-                    sub_model_outputs = sub_model(ids, segments, attn_mask, representation_token_pos=representation_token_pos)
+                    sub_model_outputs = sub_model(input_ids=ids, token_type_ids=segments, attention_mask=attn_mask)
             else:
-                sub_model_outputs = sub_model(ids, segments, attn_mask, representation_token_pos=representation_token_pos, )
+                sub_model_outputs = sub_model(input_ids=ids, token_type_ids=segments, attention_mask=attn_mask)
         else:
             return None, None
         pooled_output = sub_model_outputs.pooler_output

@@ -487,7 +487,7 @@ class BiEncoderTrainer(object):
 
             selector = ds_cfg.selector if ds_cfg else DEFAULT_SELECTOR
 
-            rep_positions = selector.get_positions(biencoder_batch.question_ids, tensorizer=None)
+            rep_positions = selector.get_positions(biencoder_batch.question_ids, tenzorizer=None)
 
             loss_scale = cfg.loss_scale_factors[dataset] if cfg.loss_scale_factors else None
             loss, correct_cnt = _do_biencoder_fwd_pass(

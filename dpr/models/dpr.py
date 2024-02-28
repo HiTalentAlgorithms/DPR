@@ -15,10 +15,11 @@ from typing import Tuple, List
 
 import torch
 from torch import nn
-from transformers import AdamW, DPRContextEncoderTokenizer, DPRQuestionEncoderTokenizer, DPRQuestionEncoder
+from torch.optim import AdamW
 from transformers import BertTokenizer
 from transformers import DPRConfig
 from transformers import DPRContextEncoder
+from transformers import DPRContextEncoderTokenizer, DPRQuestionEncoderTokenizer, DPRQuestionEncoder
 
 from dpr.models.biencoder import BiEncoder
 from dpr.models.hf_models import BertTensorizer
@@ -38,13 +39,19 @@ def get_dpr_biencoder_components(cfg, inference_only: bool = False, **kwargs) \
             BiEncoder,
             t.Optional[torch.optim.Optimizer]]:
     dropout = cfg.encoder.dropout if hasattr(cfg.encoder, "dropout") else 0.0
-    if dropout != 0:
-        cfg.attention_probs_dropout_prob = dropout
-        cfg.hidden_dropout_prob = dropout
-    q_encoder = DPRQuestionEncoder.from_pretrained(cfg.encoder.q_pretrained_model_cfg,
-                                                   config=cfg, project_dim=cfg.encoder.q_projection_dim, **kwargs)
-    ctx_encoder = DPRContextEncoder.from_pretrained(cfg.encoder.ctx_pretrained_model_cfg,
-                                                    config=cfg, project_dim=cfg.encoder.q_projection_dim, **kwargs)
+    q_encoder_cfg = DPRConfig.from_pretrained(cfg.encoder.q_pretrained_model_cfg,
+                                              projection_dim=cfg.encoder.projection_dim,
+                                              hidden_dropout_prob=dropout,
+                                              attention_probs_dropout_prob=dropout)
+    q_encoder = DPRQuestionEncoder.from_pretrained(pretrained_model_name_or_path=cfg.encoder.q_pretrained_model_cfg,
+                                                   config=q_encoder_cfg, **kwargs)
+
+    ctx_encoder_cfg = DPRConfig.from_pretrained(cfg.encoder.ctx_pretrained_model_cfg,
+                                                projection_dim=cfg.encoder.projection_dim,
+                                                hidden_dropout_prob=dropout,
+                                                attention_probs_dropout_prob=dropout)
+    ctx_encoder = DPRContextEncoder.from_pretrained(pretrained_model_name_or_path=cfg.encoder.ctx_pretrained_model_cfg,
+                                                    config=ctx_encoder_cfg, **kwargs)
 
     fix_ctx_encoder = cfg.encoder.fix_ctx_encoder if hasattr(cfg.encoder, "fix_ctx_encoder") else False
     fix_q_encoder = cfg.encoder.fix_q_encoder if hasattr(cfg.encoder, "fix_q_encoder") else False
