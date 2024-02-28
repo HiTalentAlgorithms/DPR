@@ -6,8 +6,8 @@ defaults:
   - datasets: encoder_train_default
   - _self_
 
-train_datasets: [/workspace/shared/DPR/dpr/downloads/data/retriever/nq-train.json]
-dev_datasets: [/workspace/shared/DPR/dpr/downloads/data/retriever/nq-dev.json]
+train_datasets: [/workspace/shared/rater_data/data_dpr/biz_skill_train.json]
+dev_datasets: [/workspace/shared/rater_data/data_dpr/biz_skill_test.json]
 output_dir: /workspace/shared/DPR/output
 train_sampling_rates:
 loss_scale_factors:
