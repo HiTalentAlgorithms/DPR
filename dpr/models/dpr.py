@@ -10,38 +10,45 @@ Encoder model wrappers based on HuggingFace code
 """
 
 import logging
+import typing as t
 from typing import Tuple, List
 
 import torch
-from torch import Tensor as T
 from torch import nn
-from transformers import DPRContextEncoder
-from transformers import DPRConfig
-from transformers import AdamW
+from transformers import AdamW, DPRContextEncoderTokenizer, DPRQuestionEncoderTokenizer, DPRQuestionEncoder
 from transformers import BertTokenizer
-from dpr.utils.data_utils import Tensorizer
+from transformers import DPRConfig
+from transformers import DPRContextEncoder
+
 from dpr.models.biencoder import BiEncoder
+from dpr.models.hf_models import BertTensorizer
+
 logger = logging.getLogger(__name__)
 
 
-def get_dpr_biencoder_components(cfg, inference_only: bool = False, **kwargs):
+class DPRTensorizer(BertTensorizer):
+    def __init__(self, tokenizer: t.Union[DPRQuestionEncoderTokenizer, DPRContextEncoderTokenizer], max_length: int, pad_to_max: bool = True):
+        super().__init__(tokenizer=tokenizer, max_length=max_length, pad_to_max=pad_to_max)
+
+
+def get_dpr_biencoder_components(cfg, inference_only: bool = False, **kwargs) \
+        -> Tuple[
+            DPRTensorizer,
+            DPRTensorizer,
+            BiEncoder,
+            t.Optional[torch.optim.Optimizer]]:
     dropout = cfg.encoder.dropout if hasattr(cfg.encoder, "dropout") else 0.0
-    q_encoder = DPRBertEncoder.init_encoder(
-        cfg.encoder.q_pretrained_model_cfg,
-        projection_dim=cfg.encoder.projection_dim,
-        dropout=dropout,
-        pretrained=cfg.encoder.pretrained,
-        **kwargs
-    )
-    ctx_encoder = DPRBertEncoder.init_encoder(
-        cfg.encoder.ctx_pretrained_model_cfg,
-        projection_dim=cfg.encoder.projection_dim,
-        dropout=dropout,
-        pretrained=cfg.encoder.pretrained,
-        **kwargs
-    )
+    if dropout != 0:
+        cfg.attention_probs_dropout_prob = dropout
+        cfg.hidden_dropout_prob = dropout
+    q_encoder = DPRQuestionEncoder.from_pretrained(cfg.encoder.q_pretrained_model_cfg,
+                                                   config=cfg, project_dim=cfg.encoder.q_projection_dim, **kwargs)
+    ctx_encoder = DPRContextEncoder.from_pretrained(cfg.encoder.ctx_pretrained_model_cfg,
+                                                    config=cfg, project_dim=cfg.encoder.q_projection_dim, **kwargs)
+
     fix_ctx_encoder = cfg.encoder.fix_ctx_encoder if hasattr(cfg.encoder, "fix_ctx_encoder") else False
-    biencoder = BiEncoder(q_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder)
+    fix_q_encoder = cfg.encoder.fix_q_encoder if hasattr(cfg.encoder, "fix_q_encoder") else False
+    biencoder = BiEncoder(q_encoder, ctx_encoder, fix_q_encoder=fix_q_encoder, fix_ctx_encoder=fix_ctx_encoder)
     optimizer = (
         get_optimizer(
             biencoder,
@@ -52,28 +59,23 @@ def get_dpr_biencoder_components(cfg, inference_only: bool = False, **kwargs):
         if not inference_only
         else None
     )
-    # ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained("facebook/dpr-ctx_encoder-multiset-base")
-    return get_bert_tensorizer(cfg), biencoder, optimizer
+    ctx_tensorizer, question_tensorizer = get_dpr_tensorizers(cfg=cfg)
+    return ctx_tensorizer, question_tensorizer, biencoder, optimizer
 
 
-# TODO: unify tensorizer init methods
-def get_bert_tensorizer(cfg):
+def get_dpr_tensorizers(cfg: DPRConfig) \
+        -> Tuple[
+            DPRTensorizer,
+            DPRTensorizer]:
     sequence_length = cfg.encoder.sequence_length
-    pretrained_model_cfg = cfg.encoder.q_pretrained_model_cfg
-    tokenizer = get_bert_tokenizer(pretrained_model_cfg, do_lower_case=cfg.do_lower_case)
+    ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(cfg.encoder.ctx_pretrained_model_cfg, do_lower_case=cfg.do_lower_case)
+    question_tokenizer = DPRQuestionEncoderTokenizer.from_pretrained(cfg.encoder.q_pretrained_model_cfg, do_lower_case=cfg.do_lower_case)
+
     if cfg.special_tokens:
-        _add_special_tokens(tokenizer, cfg.special_tokens)
+        _add_special_tokens(ctx_tokenizer, cfg.special_tokens)
+        _add_special_tokens(question_tokenizer, cfg.special_tokens)
 
-    return BertTensorizer(tokenizer, sequence_length)
-
-
-def get_bert_tensorizer_p(
-    pretrained_model_cfg: str, sequence_length: int, do_lower_case: bool = True, special_tokens: List[str] = []
-):
-    tokenizer = get_bert_tokenizer(pretrained_model_cfg, do_lower_case=do_lower_case)
-    if special_tokens:
-        _add_special_tokens(tokenizer, special_tokens)
-    return BertTensorizer(tokenizer, sequence_length)
+    return DPRTensorizer(ctx_tokenizer, sequence_length), DPRTensorizer(question_tokenizer, sequence_length)
 
 
 def _add_special_tokens(tokenizer, special_tokens):
@@ -100,19 +102,21 @@ def _add_special_tokens(tokenizer, special_tokens):
     logger.info("additional_special_tokens_ids: %s", tokenizer.additional_special_tokens_ids)
     logger.info("all_special_tokens %s", tokenizer.all_special_tokens)
 
+
 def get_optimizer(
-    model: nn.Module,
-    learning_rate: float = 1e-5,
-    adam_eps: float = 1e-8,
-    weight_decay: float = 0.0,
+        model: nn.Module,
+        learning_rate: float = 1e-5,
+        adam_eps: float = 1e-8,
+        weight_decay: float = 0.0,
 ) -> torch.optim.Optimizer:
+    print(model)
     optimizer_grouped_parameters = get_hf_model_param_grouping(model, weight_decay)
     return get_optimizer_grouped(optimizer_grouped_parameters, learning_rate, adam_eps)
 
 
 def get_hf_model_param_grouping(
-    model: nn.Module,
-    weight_decay: float = 0.0,
+        model: nn.Module,
+        weight_decay: float = 0.0,
 ):
     no_decay = ["bias", "LayerNorm.weight"]
 
@@ -129,138 +133,13 @@ def get_hf_model_param_grouping(
 
 
 def get_optimizer_grouped(
-    optimizer_grouped_parameters: List,
-    learning_rate: float = 1e-5,
-    adam_eps: float = 1e-8,
+        optimizer_grouped_parameters: List,
+        learning_rate: float = 1e-5,
+        adam_eps: float = 1e-8,
 ) -> torch.optim.Optimizer:
-
     optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
     return optimizer
 
 
 def get_bert_tokenizer(pretrained_cfg_name: str, do_lower_case: bool = True):
     return BertTokenizer.from_pretrained(pretrained_cfg_name, do_lower_case=do_lower_case)
-
-
-class DPRBertEncoder(DPRContextEncoder):
-    def __init__(self, config, project_dim: int = 0):
-        DPRContextEncoder.__init__(self, config)
-        assert config.hidden_size > 0, "Encoder hidden_size can't be zero"
-        self.encode_proj = nn.Linear(config.hidden_size, project_dim) if project_dim != 0 else None
-        self.init_weights()
-
-    @classmethod
-    def init_encoder(
-        cls, cfg_name: str, projection_dim: int = 0, dropout: float = 0.1, pretrained: bool = True, **kwargs
-    ) -> DPRContextEncoder:
-        logger.info("Initializing DPR BERT Encoder. cfg_name=%s", cfg_name)
-        cfg = DPRConfig.from_pretrained(cfg_name)
-        if dropout != 0:
-            cfg.attention_probs_dropout_prob = dropout
-            cfg.hidden_dropout_prob = dropout
-        if pretrained:
-            return cls.from_pretrained(cfg_name, config=cfg, project_dim=projection_dim, **kwargs)
-        else:
-            return DPRBertEncoder(cfg, project_dim=projection_dim)
-
-    def forward(
-        self,
-        input_ids: T,
-        token_type_ids: T,
-        attention_mask: T,
-        representation_token_pos=0,
-    ) -> Tuple[T, ...]:
-
-        out = super().forward(
-            input_ids=input_ids,
-            token_type_ids=token_type_ids,
-            attention_mask=attention_mask,
-        )
-
-        if self.config.output_hidden_states:
-            pooled_output, hidden_states = out.pooler_output, out.pooler_output
-        else:
-            hidden_states = None
-            out = super().forward(
-                input_ids=input_ids,
-                token_type_ids=token_type_ids,
-                attention_mask=attention_mask,
-            )
-            pooled_output = out.pooler_output
-
-        if self.encode_proj:
-            pooled_output = self.encode_proj(pooled_output)
-        return pooled_output, hidden_states
-
-    # TODO: make a super class for all encoders
-    def get_out_size(self):
-        if self.encode_proj:
-            return self.encode_proj.out_features
-        return self.config.hidden_size
-
-
-class BertTensorizer(Tensorizer):
-    def __init__(self, tokenizer: BertTokenizer, max_length: int, pad_to_max: bool = True):
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.pad_to_max = pad_to_max
-
-    def text_to_tensor(
-        self,
-        text: str,
-        title: str = None,
-        add_special_tokens: bool = True,
-        apply_max_len: bool = True,
-    ):
-        text = text.strip()
-        # tokenizer automatic padding is explicitly disabled since its inconsistent behavior
-        # TODO: move max len to methods params?
-
-        if title:
-            token_ids = self.tokenizer.encode(
-                title,
-                text_pair=text,
-                add_special_tokens=add_special_tokens,
-                max_length=self.max_length if apply_max_len else 10000,
-                pad_to_max_length=False,
-                truncation=True,
-            )
-        else:
-            token_ids = self.tokenizer.encode(
-                text,
-                add_special_tokens=add_special_tokens,
-                max_length=self.max_length if apply_max_len else 10000,
-                pad_to_max_length=False,
-                truncation=True,
-            )
-
-        seq_len = self.max_length
-        if self.pad_to_max and len(token_ids) < seq_len:
-            token_ids = token_ids + [self.tokenizer.pad_token_id] * (seq_len - len(token_ids))
-        if len(token_ids) >= seq_len:
-            token_ids = token_ids[0:seq_len] if apply_max_len else token_ids
-            token_ids[-1] = self.tokenizer.sep_token_id
-
-        return torch.tensor(token_ids)
-
-    def get_pair_separator_ids(self) -> T:
-        return torch.tensor([self.tokenizer.sep_token_id])
-
-    def get_pad_id(self) -> int:
-        return self.tokenizer.pad_token_id
-
-    def get_attn_mask(self, tokens_tensor: T) -> T:
-        return tokens_tensor != self.get_pad_id()
-
-    def is_sub_word_id(self, token_id: int):
-        token = self.tokenizer.convert_ids_to_tokens([token_id])[0]
-        return token.startswith("##") or token.startswith(" ##")
-
-    def to_string(self, token_ids, skip_special_tokens=True):
-        return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
-
-    def set_pad_to_max(self, do_pad: bool):
-        self.pad_to_max = do_pad
-
-    def get_token_id(self, token: str) -> int:
-        return self.tokenizer.vocab[token]

@@ -17,7 +17,6 @@ import transformers
 from torch import Tensor as T
 from torch import nn
 
-
 if transformers.__version__.startswith("4"):
     from transformers import BertConfig, BertModel
     from transformers import AdamW
@@ -94,6 +93,8 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
     return tensorizer, reader, optimizer
 
 
+
+
 # TODO: unify tensorizer init methods
 def get_bert_tensorizer(cfg):
     sequence_length = cfg.encoder.sequence_length
@@ -106,7 +107,7 @@ def get_bert_tensorizer(cfg):
 
 
 def get_bert_tensorizer_p(
-    pretrained_model_cfg: str, sequence_length: int, do_lower_case: bool = True, special_tokens: List[str] = []
+        pretrained_model_cfg: str, sequence_length: int, do_lower_case: bool = True, special_tokens: List[str] = []
 ):
     tokenizer = get_bert_tokenizer(pretrained_model_cfg, do_lower_case=do_lower_case)
     if special_tokens:
@@ -145,18 +146,18 @@ def get_roberta_tensorizer(pretrained_model_cfg: str, do_lower_case: bool, seque
 
 
 def get_optimizer(
-    model: nn.Module,
-    learning_rate: float = 1e-5,
-    adam_eps: float = 1e-8,
-    weight_decay: float = 0.0,
+        model: nn.Module,
+        learning_rate: float = 1e-5,
+        adam_eps: float = 1e-8,
+        weight_decay: float = 0.0,
 ) -> torch.optim.Optimizer:
     optimizer_grouped_parameters = get_hf_model_param_grouping(model, weight_decay)
     return get_optimizer_grouped(optimizer_grouped_parameters, learning_rate, adam_eps)
 
 
 def get_hf_model_param_grouping(
-    model: nn.Module,
-    weight_decay: float = 0.0,
+        model: nn.Module,
+        weight_decay: float = 0.0,
 ):
     no_decay = ["bias", "LayerNorm.weight"]
 
@@ -173,11 +174,10 @@ def get_hf_model_param_grouping(
 
 
 def get_optimizer_grouped(
-    optimizer_grouped_parameters: List,
-    learning_rate: float = 1e-5,
-    adam_eps: float = 1e-8,
+        optimizer_grouped_parameters: List,
+        learning_rate: float = 1e-5,
+        adam_eps: float = 1e-8,
 ) -> torch.optim.Optimizer:
-
     optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
     return optimizer
 
@@ -200,7 +200,7 @@ class HFBertEncoder(BertModel):
 
     @classmethod
     def init_encoder(
-        cls, cfg_name: str, projection_dim: int = 0, dropout: float = 0.1, pretrained: bool = True, **kwargs
+            cls, cfg_name: str, projection_dim: int = 0, dropout: float = 0.1, pretrained: bool = True, **kwargs
     ) -> BertModel:
         logger.info("Initializing HF BERT Encoder. cfg_name=%s", cfg_name)
         cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased")
@@ -214,11 +214,11 @@ class HFBertEncoder(BertModel):
             return HFBertEncoder(cfg, project_dim=projection_dim)
 
     def forward(
-        self,
-        input_ids: T,
-        token_type_ids: T,
-        attention_mask: T,
-        representation_token_pos=0,
+            self,
+            input_ids: T,
+            token_type_ids: T,
+            attention_mask: T,
+            representation_token_pos=0,
     ) -> Tuple[T, ...]:
 
         out = super().forward(
@@ -229,8 +229,8 @@ class HFBertEncoder(BertModel):
 
         # HF >4.0 version support
         if transformers.__version__.startswith("4") and isinstance(
-            out,
-            transformers.modeling_outputs.BaseModelOutputWithPoolingAndCrossAttentions,
+                out,
+                transformers.modeling_outputs.BaseModelOutputWithPoolingAndCrossAttentions,
         ):
             sequence_output = out.last_hidden_state
             pooled_output = None
@@ -274,11 +274,11 @@ class BertTensorizer(Tensorizer):
         self.pad_to_max = pad_to_max
 
     def text_to_tensor(
-        self,
-        text: str,
-        title: str = None,
-        add_special_tokens: bool = True,
-        apply_max_len: bool = True,
+            self,
+            text: str,
+            title: str = None,
+            add_special_tokens: bool = True,
+            apply_max_len: bool = True,
     ):
         text = text.strip()
         # tokenizer automatic padding is explicitly disabled since its inconsistent behavior

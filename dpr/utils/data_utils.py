@@ -112,6 +112,7 @@ class RepStaticPosTokenSelector(RepTokenSelector):
         self.static_position = static_position
 
     def get_positions(self, input_ids: T, tenzorizer: Tensorizer):
+        # todo why check tenzorizer was not used?
         return self.static_position
 
 

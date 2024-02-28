@@ -71,6 +71,10 @@ Installation from the source. Python's virtual or Conda environments are recomme
 git clone git@github.com:facebookresearch/DPR.git
 cd DPR
 pip install .
+
+
+# install en_core_web_sm
+python3 -m spacy download en_core_web_sm
 ```
 
 DPR is tested on Python 3.6+ and PyTorch 1.2.0+.
@@ -144,11 +148,17 @@ output_dir={path to checkpoints dir}
 Example for NQ dataset
 
 ```bash
-python train_dense_encoder.py \
+python3 train_dense_encoder.py \
+train_datasets=["/workspace/shared/DPR/dpr/downloads/data/retriever/nq-train.json"] \
+dev_datasets=["/workspace/shared/DPR/dpr/downloads/data/retriever/nq-dev.json"] \
+train=biencoder_local \
+output_dir=/workspace/shared/DPR/output
+
+python3 train_dense_encoder.py \
 train_datasets=[nq_train] \
 dev_datasets=[nq_dev] \
 train=biencoder_local \
-output_dir={path to checkpoints dir}
+output_dir=/workspace/shared/DPR/output
 ```
 
 DPR uses HuggingFace BERT-base as the encoder by default. Other ready options include Fairseq's ROBERTA and Pytext BERT models.

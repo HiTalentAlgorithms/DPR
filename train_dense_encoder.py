@@ -76,7 +76,7 @@ class BiEncoderTrainer(object):
             saved_state = load_states_from_checkpoint(model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
-        tensorizer, model, optimizer = init_biencoder_components(cfg.encoder.encoder_model_type, cfg)
+        ctx_tensorizer, question_tensorizer, model, optimizer = init_biencoder_components(cfg.encoder.encoder_model_type, cfg)
 
         model, optimizer = setup_for_distributed_mode(
             model,
@@ -89,7 +89,8 @@ class BiEncoderTrainer(object):
         )
         self.biencoder = model
         self.optimizer = optimizer
-        self.tensorizer = tensorizer
+        self.ctx_tensorizer = ctx_tensorizer
+        self.question_tensorizer = question_tensorizer
         self.start_epoch = 0
         self.start_batch = 0
         self.scheduler_state = None
@@ -104,13 +105,13 @@ class BiEncoderTrainer(object):
         self.dev_iterator = None
 
     def get_data_iterator(
-        self,
-        batch_size: int,
-        is_train_set: bool,
-        shuffle=True,
-        shuffle_seed: int = 0,
-        offset: int = 0,
-        rank: int = 0,
+            self,
+            batch_size: int,
+            is_train_set: bool,
+            shuffle=True,
+            shuffle_seed: int = 0,
+            offset: int = 0,
+            rank: int = 0,
     ):
 
         hydra_datasets = self.ds_cfg.train_datasets if is_train_set else self.ds_cfg.dev_datasets
@@ -247,24 +248,26 @@ class BiEncoderTrainer(object):
             logger.info("Eval step: %d ,rnk=%s", i, cfg.local_rank)
 
             biencoder_input = biencoder.create_biencoder_input(
-                samples_batch,
-                self.tensorizer,
-                True,
-                num_hard_negatives,
-                num_other_negatives,
+                samples=samples_batch,
+                q_tensorizer=self.question_tensorizer,
+                ctx_tensorizer=self.ctx_tensorizer,
+                insert_title=True,
+                num_hard_negatives=num_hard_negatives,
+                num_other_negatives=num_other_negatives,
                 shuffle=False,
             )
 
             # get the token to be used for representation selection
             ds_cfg = self.ds_cfg.dev_datasets[dataset]
-            rep_positions = ds_cfg.selector.get_positions(biencoder_input.question_ids, self.tensorizer)
+            rep_positions = ds_cfg.selector.get_positions(biencoder_input.question_ids, tenzorizer=None)
             encoder_type = ds_cfg.encoder_type
 
             loss, correct_cnt = _do_biencoder_fwd_pass(
-                self.biencoder,
-                biencoder_input,
-                self.tensorizer,
-                cfg,
+                model=self.biencoder,
+                input=biencoder_input,
+                question_tensorizer=self.question_tensorizer,
+                ctx_tensorizer=self.ctx_tensorizer,
+                cfg=cfg,
                 encoder_type=encoder_type,
                 rep_positions=rep_positions,
             )
@@ -334,11 +337,12 @@ class BiEncoderTrainer(object):
                 samples_batch, dataset = samples_batch
 
             biencoder_input = biencoder.create_biencoder_input(
-                samples_batch,
-                self.tensorizer,
-                True,
-                num_hard_negatives,
-                num_other_negatives,
+                samples=samples_batch,
+                q_tensorizer=self.question_tensorizer,
+                ctx_tensorizer=self.ctx_tensorizer,
+                insert_title=True,
+                num_hard_negatives=num_hard_negatives,
+                num_other_negatives=num_other_negatives,
                 shuffle=False,
             )
             biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), cfg.device))
@@ -350,7 +354,7 @@ class BiEncoderTrainer(object):
             # get the token to be used for representation selection
             ds_cfg = self.ds_cfg.dev_datasets[dataset]
             encoder_type = ds_cfg.encoder_type
-            rep_positions = ds_cfg.selector.get_positions(biencoder_input.question_ids, self.tensorizer)
+            rep_positions = ds_cfg.selector.get_positions(biencoder_input.question_ids, tenzorizer=None)
 
             # split contexts batch into sub batches since it is supposed to be too large to be processed in one batch
             for j, batch_start in enumerate(range(0, bsz, sub_batch_size)):
@@ -364,10 +368,10 @@ class BiEncoderTrainer(object):
                     # otherwise the other input tensors will be split but only the first split will be called
                     continue
 
-                ctx_ids_batch = ctxs_ids[batch_start : batch_start + sub_batch_size]
-                ctx_seg_batch = ctxs_segments[batch_start : batch_start + sub_batch_size]
-                q_attn_mask = self.tensorizer.get_attn_mask(q_ids)
-                ctx_attn_mask = self.tensorizer.get_attn_mask(ctx_ids_batch)
+                ctx_ids_batch = ctxs_ids[batch_start: batch_start + sub_batch_size]
+                ctx_seg_batch = ctxs_segments[batch_start: batch_start + sub_batch_size]
+                q_attn_mask = self.question_tensorizer.get_attn_mask(q_ids)
+                ctx_attn_mask = self.ctx_tensorizer.get_attn_mask(ctx_ids_batch)
                 with torch.no_grad():
                     q_dense, ctx_dense = self.biencoder(
                         q_ids,
@@ -430,11 +434,11 @@ class BiEncoderTrainer(object):
         return av_rank
 
     def _train_epoch(
-        self,
-        scheduler,
-        epoch: int,
-        eval_step: int,
-        train_data_iterator: MultiSetDataIterator,
+            self,
+            scheduler,
+            epoch: int,
+            eval_step: int,
+            train_data_iterator: MultiSetDataIterator,
     ):
 
         cfg = self.cfg
@@ -467,11 +471,12 @@ class BiEncoderTrainer(object):
             random.seed(seed + epoch + data_iteration)
 
             biencoder_batch = biencoder.create_biencoder_input(
-                samples_batch,
-                self.tensorizer,
-                True,
-                num_hard_negatives,
-                num_other_negatives,
+                samples=samples_batch,
+                q_tensorizer=self.question_tensorizer,
+                ctx_tensorizer=self.ctx_tensorizer,
+                insert_title=True,
+                num_hard_negatives=num_hard_negatives,
+                num_other_negatives=num_other_negatives,
                 shuffle=True,
                 shuffle_positives=shuffle_positives,
                 query_token=special_token,
@@ -482,14 +487,15 @@ class BiEncoderTrainer(object):
 
             selector = ds_cfg.selector if ds_cfg else DEFAULT_SELECTOR
 
-            rep_positions = selector.get_positions(biencoder_batch.question_ids, self.tensorizer)
+            rep_positions = selector.get_positions(biencoder_batch.question_ids, tensorizer=None)
 
             loss_scale = cfg.loss_scale_factors[dataset] if cfg.loss_scale_factors else None
             loss, correct_cnt = _do_biencoder_fwd_pass(
-                self.biencoder,
-                biencoder_batch,
-                self.tensorizer,
-                cfg,
+                model=self.biencoder,
+                input=biencoder_batch,
+                ctx_tensorizer=self.ctx_tensorizer,
+                question_tensorizer=self.question_tensorizer,
+                cfg=cfg,
                 encoder_type=encoder_type,
                 rep_positions=rep_positions,
                 loss_scale=loss_scale,
@@ -603,13 +609,13 @@ class BiEncoderTrainer(object):
 
 
 def _calc_loss(
-    cfg,
-    loss_function,
-    local_q_vector,
-    local_ctx_vectors,
-    local_positive_idxs,
-    local_hard_negatives_idxs: list = None,
-    loss_scale: float = None,
+        cfg,
+        loss_function,
+        local_q_vector,
+        local_ctx_vectors,
+        local_positive_idxs,
+        local_hard_negatives_idxs: list = None,
+        loss_scale: float = None,
 ) -> Tuple[T, bool]:
     """
     Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
@@ -685,19 +691,19 @@ def _print_norms(model):
 
 
 def _do_biencoder_fwd_pass(
-    model: nn.Module,
-    input: BiEncoderBatch,
-    tensorizer: Tensorizer,
-    cfg,
-    encoder_type: str,
-    rep_positions=0,
-    loss_scale: float = None,
+        model: nn.Module,
+        input: BiEncoderBatch,
+        ctx_tensorizer: Tensorizer,
+        question_tensorizer: Tensorizer,
+        cfg,
+        encoder_type: str,
+        rep_positions=0,
+        loss_scale: float = None,
 ) -> Tuple[torch.Tensor, int]:
-
     input = BiEncoderBatch(**move_to_device(input._asdict(), cfg.device))
 
-    q_attn_mask = tensorizer.get_attn_mask(input.question_ids)
-    ctx_attn_mask = tensorizer.get_attn_mask(input.context_ids)
+    q_attn_mask = question_tensorizer.get_attn_mask(input.question_ids)
+    ctx_attn_mask = ctx_tensorizer.get_attn_mask(input.context_ids)
 
     if model.training:
         model_out = model(
@@ -782,7 +788,7 @@ if __name__ == "__main__":
     # convert the cli params added by torch.distributed.launch into Hydra format
     for arg in sys.argv:
         if arg.startswith("--"):
-            hydra_formatted_args.append(arg[len("--") :])
+            hydra_formatted_args.append(arg[len("--"):])
         else:
             hydra_formatted_args.append(arg)
     logger.info("Hydra formatted Sys.argv: %s", hydra_formatted_args)
