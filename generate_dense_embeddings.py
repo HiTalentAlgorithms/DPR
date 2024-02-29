@@ -9,6 +9,7 @@
  Command line tool that produces embeddings for a large documents base based on the pretrained ctx & question encoders
  Supposed to be used in a 'sharded' way to speed up the process.
 """
+import itertools
 import logging
 import math
 import os
@@ -23,9 +24,9 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
 from dpr.data.biencoder_data import BiEncoderPassage
+from dpr.data.retriever_data import QASample
 from dpr.models import init_biencoder_components
 from dpr.options import set_cfg_params_from_state, setup_cfg_gpu, setup_logger
-
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import (
     setup_for_distributed_mode,
@@ -39,18 +40,18 @@ setup_logger(logger)
 
 
 def gen_ctx_vectors(
-    cfg: DictConfig,
-    ctx_rows: List[Tuple[object, BiEncoderPassage]],
-    model: nn.Module,
-    tensorizer: Tensorizer,
-    insert_title: bool = True,
+        cfg: DictConfig,
+        ctx_rows: List[Tuple[object, BiEncoderPassage]],
+        model: nn.Module,
+        tensorizer: Tensorizer,
+        insert_title: bool = True,
 ) -> List[Tuple[object, np.array]]:
     n = len(ctx_rows)
     bsz = cfg.batch_size
     total = 0
     results = []
     for j, batch_start in enumerate(range(0, n, bsz)):
-        batch = ctx_rows[batch_start : batch_start + bsz]
+        batch = ctx_rows[batch_start: batch_start + bsz]
         batch_token_tensors = [
             tensorizer.text_to_tensor(ctx[1].text, title=ctx[1].title if insert_title else None) for ctx in batch
         ]
@@ -59,8 +60,8 @@ def gen_ctx_vectors(
         ctx_seg_batch = move_to_device(torch.zeros_like(ctx_ids_batch), cfg.device)
         ctx_attn_mask = move_to_device(tensorizer.get_attn_mask(ctx_ids_batch), cfg.device)
         with torch.no_grad():
-            _, out, _ = model(ctx_ids_batch, ctx_seg_batch, ctx_attn_mask)
-        out = out.cpu()
+            out = model(input_ids=ctx_ids_batch, token_type_ids=ctx_seg_batch, attention_mask=ctx_attn_mask)
+        out = out.pooler_output.cpu()
 
         ctx_ids = [r[0] for r in batch]
         extra_info = []
@@ -83,9 +84,7 @@ def gen_ctx_vectors(
 
 @hydra.main(config_path="conf", config_name="gen_embs")
 def main(cfg: DictConfig):
-
     assert cfg.model_file, "Please specify encoder checkpoint as model_file param"
-    assert cfg.ctx_src, "Please specify passages source as ctx_src param"
 
     cfg = setup_cfg_gpu(cfg)
 
@@ -93,11 +92,11 @@ def main(cfg: DictConfig):
     set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
     logger.info("CFG:")
-    logger.info("%s", OmegaConf.to_yaml(cfg))
+    logger.info("\n%s", OmegaConf.to_yaml(cfg))
 
-    tensorizer, encoder, _ = init_biencoder_components(cfg.encoder.encoder_model_type, cfg, inference_only=True)
+    ctx_tensorizer, question_tensorizer, model, optimizer = init_biencoder_components(cfg.encoder.encoder_model_type, cfg, inference_only=True)
 
-    encoder = encoder.ctx_model if cfg.encoder_type == "ctx" else encoder.question_model
+    encoder = model.ctx_model if cfg.encoder_type == "ctx" else model.question_model
 
     encoder, _ = setup_for_distributed_mode(
         encoder,
@@ -124,8 +123,15 @@ def main(cfg: DictConfig):
     logger.info("reading data source: %s", cfg.ctx_src)
 
     ctx_src = hydra.utils.instantiate(cfg.ctx_sources[cfg.ctx_src])
+    ctx_src.load_data()
+
+    assert cfg.ctx_src, "Please specify passages source as ctx_src param"
     all_passages_dict = {}
-    ctx_src.load_data_to(all_passages_dict)
+    for qa_sample in ctx_src.data:
+        qa_sample: QASample
+        for cts in itertools.chain(qa_sample.positive_ctxs, qa_sample.negative_ctxs, qa_sample.hard_negative_ctxs):
+            if cts['passage_id'] not in all_passages_dict:
+                all_passages_dict[cts['passage_id']] = BiEncoderPassage(text=cts['text'], title=cts['title'])
     all_passages = [(k, v) for k, v in all_passages_dict.items()]
 
     shard_size = math.ceil(len(all_passages) / cfg.num_shards)
@@ -140,7 +146,7 @@ def main(cfg: DictConfig):
     )
     shard_passages = all_passages[start_idx:end_idx]
 
-    data = gen_ctx_vectors(cfg, shard_passages, encoder, tensorizer, True)
+    data = gen_ctx_vectors(cfg, shard_passages, encoder, ctx_tensorizer, True)
 
     file = cfg.out_file + "_" + str(cfg.shard_id)
     pathlib.Path(os.path.dirname(file)).mkdir(parents=True, exist_ok=True)

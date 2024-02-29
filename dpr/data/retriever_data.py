@@ -17,7 +17,6 @@ from dpr.data.biencoder_data import (
     read_nq_tables_jsonl,
     split_tables_to_chunks,
 )
-
 from dpr.utils.data_utils import normalize_question
 
 logger = logging.getLogger(__name__)
@@ -26,10 +25,17 @@ TableChunk = collections.namedtuple("TableChunk", ["text", "title", "table_id"])
 
 
 class QASample:
-    def __init__(self, query: str, id, answers: List[str]):
+    def __init__(self, query: str, id, answers: List[str],
+                 positive_ctxs: List[Dict] = None,
+                 negative_ctxs: List[Dict] = None,
+                 hard_negative_ctxs: List[Dict] = None,
+                 ):
         self.query = query
         self.id = id
         self.answers = answers
+        self.positive_ctxs = positive_ctxs or []
+        self.negative_ctxs = negative_ctxs or []
+        self.hard_negative_ctxs = hard_negative_ctxs or []
 
 
 class RetrieverData(torch.utils.data.Dataset):
@@ -43,18 +49,18 @@ class RetrieverData(torch.utils.data.Dataset):
     def load_data(self):
         self.data_files = get_dpr_files(self.file)
         assert (
-            len(self.data_files) == 1
+                len(self.data_files) == 1
         ), "RetrieverData source currently works with single files only. Files specified: {}".format(self.data_files)
         self.file = self.data_files[0]
 
 
 class QASrc(RetrieverData):
     def __init__(
-        self,
-        file: str,
-        selector: DictConfig = None,
-        special_query_token: str = None,
-        query_special_suffix: str = None,
+            self,
+            file: str,
+            selector: DictConfig = None,
+            special_query_token: str = None,
+            query_special_suffix: str = None,
     ):
         super().__init__(file)
         self.data = None
@@ -78,16 +84,16 @@ class QASrc(RetrieverData):
 
 class CsvQASrc(QASrc):
     def __init__(
-        self,
-        file: str,
-        question_col: int = 0,
-        answers_col: int = 1,
-        id_col: int = -1,
-        selector: DictConfig = None,
-        special_query_token: str = None,
-        query_special_suffix: str = None,
-        data_range_start: int = -1,
-        data_size: int = -1,
+            self,
+            file: str,
+            question_col: int = 0,
+            answers_col: int = 1,
+            id_col: int = -1,
+            selector: DictConfig = None,
+            special_query_token: str = None,
+            query_special_suffix: str = None,
+            data_range_start: int = -1,
+            data_size: int = -1,
     ):
         super().__init__(file, selector, special_query_token, query_special_suffix)
         self.question_col = question_col
@@ -126,14 +132,14 @@ class CsvQASrc(QASrc):
 
 class JsonlQASrc(QASrc):
     def __init__(
-        self,
-        file: str,
-        selector: DictConfig = None,
-        question_attr: str = "question",
-        answers_attr: str = "answers",
-        id_attr: str = "id",
-        special_query_token: str = None,
-        query_special_suffix: str = None,
+            self,
+            file: str,
+            selector: DictConfig = None,
+            question_attr: str = "question",
+            answers_attr: str = "answers",
+            id_attr: str = "jod_id",
+            special_query_token: str = None,
+            query_special_suffix: str = None,
     ):
         super().__init__(file, selector, special_query_token, query_special_suffix)
         self.question_attr = question_attr
@@ -154,19 +160,60 @@ class JsonlQASrc(QASrc):
         self.data = data
 
 
+class JsonQASrc(JsonlQASrc):
+    def load_data(self):
+        data = []
+        with open(self.file, mode="r") as f:
+            for line in json.load(f):
+                question = line[self.question_attr]
+                answers = line[self.answers_attr] if self.answers_attr in line else []
+                id = line[self.id_attr] if self.id_attr in line else None
+                positive_ctxs = line.get('positive_ctxs', [])
+                negative_ctxs = line.get('negative_ctxs', [])
+                hard_negative_ctxs = line.get('hard_negative_ctxs', [])
+                data.append(QASample(self._process_question(question),
+                                     id=id, answers=answers,
+                                     positive_ctxs=positive_ctxs,
+                                     negative_ctxs=negative_ctxs,
+                                     hard_negative_ctxs=hard_negative_ctxs
+                                     ))
+
+                data.append(QASample(self._process_question(question), id, answers))
+        self.data = data
+
+    def load_data_to(self, ctxs: Dict[object, BiEncoderPassage]):
+        self.load_data()
+        logger.info("Reading file %s", self.file)
+        with open(self.file) as ifile:
+            reader = csv.reader(ifile, delimiter="\t")
+            for row in reader:
+                # for row in ifile:
+                # row = row.strip().split("\t")
+                if row[self.id_col] == "id":
+                    continue
+                if self.id_prefix:
+                    sample_id = self.id_prefix + str(row[self.id_col])
+                else:
+                    sample_id = row[self.id_col]
+                passage = row[self.text_col].strip('"')
+                if self.normalize:
+                    passage = normalize_passage(passage)
+                ctxs[sample_id] = BiEncoderPassage(passage, row[self.title_col])
+
+
 class KiltCsvQASrc(CsvQASrc):
     def __init__(
-        self,
-        file: str,
-        kilt_gold_file: str,
-        question_col: int = 0,
-        answers_col: int = 1,
-        id_col: int = -1,
-        selector: DictConfig = None,
-        special_query_token: str = None,
-        query_special_suffix: str = None,
-        data_range_start: int = -1,
-        data_size: int = -1,
+            self,
+            file: str,
+            kilt_gold_file: str,
+            question_col: int = 0,
+            answers_col: int = 1,
+            id_col: int = -1,
+            selector: DictConfig = None,
+            special_query_token: str = None,
+            query_special_suffix: str = None,
+            data_range_start: int = -1,
+            data_size: int = -1,
     ):
         super().__init__(
             file,
@@ -184,15 +231,15 @@ class KiltCsvQASrc(CsvQASrc):
 
 class KiltJsonlQASrc(JsonlQASrc):
     def __init__(
-        self,
-        file: str,
-        kilt_gold_file: str,
-        question_attr: str = "input",
-        answers_attr: str = "answer",
-        id_attr: str = "id",
-        selector: DictConfig = None,
-        special_query_token: str = None,
-        query_special_suffix: str = None,
+            self,
+            file: str,
+            kilt_gold_file: str,
+            question_attr: str = "input",
+            answers_attr: str = "answer",
+            id_attr: str = "id",
+            selector: DictConfig = None,
+            special_query_token: str = None,
+            query_special_suffix: str = None,
     ):
         super().__init__(
             file,
@@ -242,7 +289,7 @@ class TTS_ASR_QASrc(QASrc):
             for r in reader:
                 row_str = r[0]
                 idx = row_str.index("(None-")
-                q_id = int(row_str[idx + len("(None-") : -1])
+                q_id = int(row_str[idx + len("(None-"): -1])
                 orig_data = orig_data_dict[q_id]
                 answers = orig_data[1]
                 q = row_str[:idx].strip().lower()
@@ -252,13 +299,13 @@ class TTS_ASR_QASrc(QASrc):
 
 class CsvCtxSrc(RetrieverData):
     def __init__(
-        self,
-        file: str,
-        id_col: int = 0,
-        text_col: int = 1,
-        title_col: int = 2,
-        id_prefix: str = None,
-        normalize: bool = False,
+            self,
+            file: str,
+            id_col: int = 0,
+            text_col: int = 1,
+            title_col: int = 2,
+            id_prefix: str = None,
+            normalize: bool = False,
     ):
         super().__init__(file)
         self.text_col = text_col
@@ -289,14 +336,14 @@ class CsvCtxSrc(RetrieverData):
 
 class KiltCsvCtxSrc(CsvCtxSrc):
     def __init__(
-        self,
-        file: str,
-        mapping_file: str,
-        id_col: int = 0,
-        text_col: int = 1,
-        title_col: int = 2,
-        id_prefix: str = None,
-        normalize: bool = False,
+            self,
+            file: str,
+            mapping_file: str,
+            id_col: int = 0,
+            text_col: int = 1,
+            title_col: int = 2,
+            id_prefix: str = None,
+            normalize: bool = False,
     ):
         super().__init__(file, id_col, text_col, title_col, id_prefix, normalize=normalize)
         self.mapping_file = mapping_file
@@ -338,11 +385,11 @@ class KiltCsvCtxSrc(CsvCtxSrc):
 
 class JsonlTablesCtxSrc(object):
     def __init__(
-        self,
-        file: str,
-        tables_chunk_sz: int = 100,
-        split_type: str = "type1",
-        id_prefix: str = None,
+            self,
+            file: str,
+            tables_chunk_sz: int = 100,
+            split_type: str = "type1",
+            id_prefix: str = None,
     ):
         self.tables_chunk_sz = tables_chunk_sz
         self.split_type = split_type

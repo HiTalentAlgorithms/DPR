@@ -1,6 +1,3 @@
-# @package _group_
-
-dpr_wiki:
-  _target_: dpr.data.retriever_data.CsvCtxSrc
-  file: data.wikipedia_split.psgs_w100
-  id_prefix: 'wiki:'
+dpr_hitalent:
+  _target_: dpr.data.retriever_data.JsonQASrc
+  file: /workspace/shared/rater_data/data_dpr/biz_skill_test.json

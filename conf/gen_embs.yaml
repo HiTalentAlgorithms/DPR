@@ -1,6 +1,8 @@
 defaults:
-  - encoder: hf_bert
+  - encoder: dpr
   - ctx_sources: default_sources
+  - _self_
+
 
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:
