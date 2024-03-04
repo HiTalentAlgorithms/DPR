@@ -7,7 +7,7 @@
 
 import importlib
 
-from dpr.models.dpr import get_dpr_biencoder_components
+from dpr.models.dpr import get_dpr_biencoder_components, get_dpr_bert_reader_components
 
 """
  'Router'-like set of methods for component initialization with lazy imports 
@@ -36,12 +36,14 @@ def init_hf_bert_reader(args, **kwargs):
 
     return get_bert_reader_components(args, **kwargs)
 
-def init_dpr_bert_reader(args, **kwargs):
+
+def init_dpr_bert_reader(*args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError("Please install transformers lib")
-    from .hf_models import get_dpr_bert_reader_components
 
-    return get_dpr_bert_reader_components(args, **kwargs)
+    return get_dpr_bert_reader_components(*args, **kwargs)
+
+
 def init_pytext_bert_biencoder(args, **kwargs):
     if importlib.util.find_spec("pytext") is None:
         raise RuntimeError("Please install pytext lib")
@@ -81,7 +83,7 @@ BIENCODER_INITIALIZERS = {
 }
 
 READER_INITIALIZERS = {
-    'dpr':init_dpr_bert_reader,
+    'dpr': init_dpr_bert_reader,
     "hf_bert": init_hf_bert_reader,
 }
 

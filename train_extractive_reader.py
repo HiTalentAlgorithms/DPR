@@ -12,18 +12,16 @@
 
 import collections
 import json
-import sys
-
-import hydra
 import logging
-import numpy as np
 import os
-import torch
-
+import sys
 from collections import defaultdict
-from omegaconf import DictConfig, OmegaConf
 from typing import List
 
+import hydra
+import numpy as np
+import torch
+from omegaconf import DictConfig, OmegaConf
 
 from dpr.data.qa_validation import exact_match_score
 from dpr.data.reader_data import (
@@ -32,7 +30,7 @@ from dpr.data.reader_data import (
     SpanPrediction,
     ExtractiveReaderDataset,
 )
-from dpr.models import init_reader_components
+from dpr.models import init_dpr_bert_reader
 from dpr.models.reader import create_reader_input, ReaderBatch, compute_loss
 from dpr.options import (
     setup_cfg_gpu,
@@ -76,7 +74,7 @@ class ReaderTrainer(object):
             saved_state = load_states_from_checkpoint(model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
-        tensorizer, reader, optimizer = init_reader_components(cfg.encoder.encoder_model_type, cfg)
+        tensorizer, reader, optimizer = init_dpr_bert_reader(encoder_type=cfg.encoder.encoder_model_type, cfg=cfg)
         reader, optimizer = setup_for_distributed_mode(
             reader,
             optimizer,
@@ -98,13 +96,13 @@ class ReaderTrainer(object):
             self._load_saved_state(saved_state)
 
     def get_data_iterator(
-        self,
-        path: str,
-        batch_size: int,
-        is_train: bool,
-        shuffle=True,
-        shuffle_seed: int = 0,
-        offset: int = 0,
+            self,
+            path: str,
+            batch_size: int,
+            is_train: bool,
+            shuffle=True,
+            shuffle_seed: int = 0,
+            offset: int = 0,
     ) -> ShardedDataIterator:
         run_preprocessing = True if self.distributed_factor == 1 or self.cfg.local_rank in [-1, 0] else False
 
@@ -267,12 +265,12 @@ class ReaderTrainer(object):
         return em
 
     def _train_epoch(
-        self,
-        scheduler,
-        epoch: int,
-        eval_step: int,
-        train_data_iterator: ShardedDataIterator,
-        global_step: int,
+            self,
+            scheduler,
+            epoch: int,
+            eval_step: int,
+            train_data_iterator: ShardedDataIterator,
+            global_step: int,
     ):
         cfg = self.cfg
         rolling_train_loss = 0.0
@@ -405,12 +403,12 @@ class ReaderTrainer(object):
         self.scheduler_state = saved_state.scheduler_dict
 
     def _get_best_prediction(
-        self,
-        start_logits,
-        end_logits,
-        relevance_logits,
-        samples_batch: List[ReaderSample],
-        passage_thresholds: List[int] = None,
+            self,
+            start_logits,
+            end_logits,
+            relevance_logits,
+            samples_batch: List[ReaderSample],
+            passage_thresholds: List[int] = None,
     ) -> List[ReaderQuestionPredictions]:
 
         cfg = self.cfg
@@ -538,7 +536,6 @@ class ReaderTrainer(object):
 
 @hydra.main(config_path="conf", config_name="extractive_reader_train_cfg")
 def main(cfg: DictConfig):
-
     if cfg.output_dir is not None:
         os.makedirs(cfg.output_dir, exist_ok=True)
 
@@ -566,7 +563,7 @@ if __name__ == "__main__":
     # convert the cli params added by torch.distributed.launch into Hydra format
     for arg in sys.argv:
         if arg.startswith("--"):
-            hydra_formatted_args.append(arg[len("--") :])
+            hydra_formatted_args.append(arg[len("--"):])
         else:
             hydra_formatted_args.append(arg)
     logger.info("Hydra formatted Sys.argv: %s", hydra_formatted_args)

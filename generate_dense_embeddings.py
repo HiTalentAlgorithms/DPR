@@ -124,16 +124,20 @@ def main(cfg: DictConfig):
 
     ctx_src = hydra.utils.instantiate(cfg.ctx_sources[cfg.ctx_src])
     ctx_src.load_data()
-
+    logger.debug('ctx_src.data.length: %d', len(ctx_src.data))
     assert cfg.ctx_src, "Please specify passages source as ctx_src param"
     all_passages_dict = {}
     for qa_sample in ctx_src.data:
         qa_sample: QASample
+        # logger.info(f'len(qa_sample.positive_ctxs){len(qa_sample.positive_ctxs)}')
+        # logger.info(f'len(qa_sample.negative_ctxs){len(qa_sample.negative_ctxs)}')
+        # logger.info(f'len(qa_sample.hard_negative_ctxs){len(qa_sample.hard_negative_ctxs)}')
         for cts in itertools.chain(qa_sample.positive_ctxs, qa_sample.negative_ctxs, qa_sample.hard_negative_ctxs):
             if cts['passage_id'] not in all_passages_dict:
                 all_passages_dict[cts['passage_id']] = BiEncoderPassage(text=cts['text'], title=cts['title'])
     all_passages = [(k, v) for k, v in all_passages_dict.items()]
 
+    logger.info('{} passages loaded'.format(len(all_passages)))
     shard_size = math.ceil(len(all_passages) / cfg.num_shards)
     start_idx = cfg.shard_id * shard_size
     end_idx = start_idx + shard_size

@@ -4,6 +4,7 @@ encoder_model_type: dpr
 # HuggingFace's config name for model initialization
 q_pretrained_model_cfg: facebook/dpr-question_encoder-single-nq-base
 ctx_pretrained_model_cfg: facebook/dpr-ctx_encoder-single-nq-base
+reader_pretrained_model_cfg: facebook/dpr-reader-single-nq-base
 
 # Some encoders need to be initialized from a file
 pretrained_file:

@@ -16,13 +16,14 @@ from typing import Tuple, List
 import torch
 from torch import nn
 from torch.optim import AdamW
-from transformers import BertTokenizer
+from transformers import BertTokenizer, DPRReaderTokenizer, DPRReader
 from transformers import DPRConfig
 from transformers import DPRContextEncoder
 from transformers import DPRContextEncoderTokenizer, DPRQuestionEncoderTokenizer, DPRQuestionEncoder
 
 from dpr.models.biencoder import BiEncoder
 from dpr.models.hf_models import BertTensorizer
+from dpr.models.reader import Reader
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,29 @@ def get_dpr_biencoder_components(cfg, inference_only: bool = False, **kwargs) \
     return ctx_tensorizer, question_tensorizer, biencoder, optimizer
 
 
+def get_dpr_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
+    dropout = cfg.encoder.dropout if hasattr(cfg.encoder, "dropout") else 0.0
+    encoder = DPRReader.from_pretrained(cfg.encoder.reader_pretrained_model_cfg,
+                                        hidden_dropout_prob=dropout,
+                                        attention_probs_dropout_prob=dropout)
+
+    hidden_size = encoder.config.hidden_size
+    reader = Reader(encoder, hidden_size)
+
+    optimizer = (
+        get_optimizer(
+            reader,
+            learning_rate=cfg.train.learning_rate,
+            adam_eps=cfg.train.adam_eps,
+            weight_decay=cfg.train.weight_decay,
+        )
+        if not inference_only
+        else None
+    )
+    reader_tensorizer = get_dpr_reader_tokenizer(cfg=cfg)
+    return reader_tensorizer, reader, optimizer
+
+
 def get_dpr_tensorizers(cfg: DPRConfig) \
         -> Tuple[
             DPRTensorizer,
@@ -83,6 +107,14 @@ def get_dpr_tensorizers(cfg: DPRConfig) \
         _add_special_tokens(question_tokenizer, cfg.special_tokens)
 
     return DPRTensorizer(ctx_tokenizer, sequence_length), DPRTensorizer(question_tokenizer, sequence_length)
+
+
+def get_dpr_reader_tokenizer(cfg: DPRConfig) -> DPRTensorizer:
+    sequence_length = cfg.encoder.sequence_length
+    reader_tokenizer = DPRReaderTokenizer.from_pretrained(cfg.encoder.ctx_pretrained_model_cfg, do_lower_case=cfg.do_lower_case)
+    if cfg.special_tokens:
+        _add_special_tokens(reader_tokenizer, cfg.special_tokens)
+    return DPRTensorizer(reader_tokenizer, sequence_length)
 
 
 def _add_special_tokens(tokenizer, special_tokens):
