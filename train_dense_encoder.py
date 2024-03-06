@@ -194,12 +194,13 @@ class BiEncoderTrainer(object):
             self._train_epoch(scheduler, epoch, eval_step, train_iterator)
 
         if cfg.local_rank in [-1, 0]:
-            logger.info("Training finished. Best validation checkpoint %s", self.best_cp_name)
+            logger.info("deleting checkpoint")
+            os.system(f'mv {self.best_cp_name}_pretrained/* /workspace/shared/DPR/output/best_pretrained_model')
+            os.system(f'rm -rf /workspace/shared/DPR/output/dpr_biencoder*')
+            # self.biencoder.ctx_model.save_pretrained(f'{cp}_pretrained/ctx_model')
+
+        logger.info("Training finished. Best validation checkpoint %s", self.best_cp_name)
         # save pretrained model
-
-
-
-
 
     def validate_and_save(self, epoch: int, iteration: int, scheduler):
         cfg = self.cfg
@@ -583,6 +584,10 @@ class BiEncoderTrainer(object):
         )
         torch.save(state._asdict(), cp)
         logger.info("Saved checkpoint at %s", cp)
+        # mkdir /workspace/shared/DPR/output/dpr_biencoder.0
+        self.biencoder.ctx_model.save_pretrained(f'{cp}_pretrained/ctx_model')
+        self.biencoder.question_model.save_pretrained(f'{cp}_pretrained/question_model')
+
         return cp
 
     def _load_saved_state(self, saved_state: CheckpointState):
