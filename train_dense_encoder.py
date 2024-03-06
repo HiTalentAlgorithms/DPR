@@ -195,6 +195,11 @@ class BiEncoderTrainer(object):
 
         if cfg.local_rank in [-1, 0]:
             logger.info("Training finished. Best validation checkpoint %s", self.best_cp_name)
+        # save pretrained model
+
+
+
+
 
     def validate_and_save(self, epoch: int, iteration: int, scheduler):
         cfg = self.cfg
@@ -247,6 +252,8 @@ class BiEncoderTrainer(object):
                 samples_batch, dataset = samples_batch
             logger.info("Eval step: %d ,rnk=%s", i, cfg.local_rank)
 
+            print('samples_batch', type(samples_batch), samples_batch)
+
             biencoder_input = biencoder.create_biencoder_input(
                 samples=samples_batch,
                 q_tensorizer=self.question_tensorizer,
@@ -256,6 +263,7 @@ class BiEncoderTrainer(object):
                 num_other_negatives=num_other_negatives,
                 shuffle=False,
             )
+            print('biencoder_input', type(biencoder_input), biencoder_input)
 
             # get the token to be used for representation selection
             ds_cfg = self.ds_cfg.dev_datasets[dataset]

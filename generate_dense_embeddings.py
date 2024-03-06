@@ -119,6 +119,7 @@ def main(cfg: DictConfig):
         key[prefix_len:]: value for (key, value) in saved_state.model_dict.items() if key.startswith("ctx_model.")
     }
     model_to_load.load_state_dict(ctx_state, strict=False)
+    print('model_to_load',model_to_load)
 
     logger.info("reading data source: %s", cfg.ctx_src)
 
@@ -126,12 +127,15 @@ def main(cfg: DictConfig):
     ctx_src.load_data()
     logger.debug('ctx_src.data.length: %d', len(ctx_src.data))
     assert cfg.ctx_src, "Please specify passages source as ctx_src param"
+
+
     all_passages_dict = {}
-    for qa_sample in ctx_src.data:
+    for i, qa_sample in enumerate(ctx_src.data):
         qa_sample: QASample
-        # logger.info(f'len(qa_sample.positive_ctxs){len(qa_sample.positive_ctxs)}')
-        # logger.info(f'len(qa_sample.negative_ctxs){len(qa_sample.negative_ctxs)}')
-        # logger.info(f'len(qa_sample.hard_negative_ctxs){len(qa_sample.hard_negative_ctxs)}')
+        if i == 0:
+            logger.info(f'len(qa_sample.positive_ctxs){len(qa_sample.positive_ctxs)},{qa_sample.positive_ctxs}')
+            logger.info(f'len(qa_sample.negative_ctxs){len(qa_sample.negative_ctxs)},{qa_sample.negative_ctxs}')
+            logger.info(f'len(qa_sample.hard_negative_ctxs){len(qa_sample.hard_negative_ctxs)},{qa_sample.hard_negative_ctxs}')
         for cts in itertools.chain(qa_sample.positive_ctxs, qa_sample.negative_ctxs, qa_sample.hard_negative_ctxs):
             if cts['passage_id'] not in all_passages_dict:
                 all_passages_dict[cts['passage_id']] = BiEncoderPassage(text=cts['text'], title=cts['title'])
@@ -148,10 +152,10 @@ def main(cfg: DictConfig):
         end_idx,
         len(all_passages),
     )
-    shard_passages = all_passages[start_idx:end_idx]
+    shard_passages = all_passages[start_idx:100]
 
     data = gen_ctx_vectors(cfg, shard_passages, encoder, ctx_tensorizer, True)
-
+    print('data[0]',data[0])
     file = cfg.out_file + "_" + str(cfg.shard_id)
     pathlib.Path(os.path.dirname(file)).mkdir(parents=True, exist_ok=True)
     logger.info("Writing results to %s" % file)
